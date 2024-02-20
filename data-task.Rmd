@@ -1,0 +1,243 @@
+---
+title: "Behavioral Science and Marketing Data Analysis Tasks"
+date: "2024-02-18"
+output: 
+  bookdown::html_document2:
+    toc: true
+    toc_float :
+      collapsed: true
+    number_sections: false
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+```{r load-packages}
+# loading required packages
+library(tidyverse) # for data wrangling
+library(readxl) # to read excel files
+library(afex) # to run ANOVA
+library(emmeans) # to conduct pairwise t-tests after ANOVA
+
+# setting ggplot theme
+theme_set(theme_minimal(base_size = 15))
+```
+
+# Task 1
+
+```{r data-clean}
+# reading the raw dataset from the excel file
+raw_data <- read_excel("Data - Fall 2023.xlsx", 
+                       sheet = "Data")
+
+# excluding the incomplete or unfinished responses from the dataset
+data_clean1 <- raw_data |> 
+  filter(Progress == 100, 
+         passedattn == "yes", 
+         consent == "AGREE",
+         age < 100) |>
+  distinct() # removing duplicate rows
+
+# selecting only the necessary columns for further analyses
+data_clean2 <- data_clean1 |>
+  select(ResponseId,
+         feelings_youalone : feelings_youaloneforgiven, 
+         outcome_binary1, initiator_type)
+```
+
+## Do people care about getting a return apology? 
+
+```{r data-analyze1}
+# making a data table with summary statistics for each group
+summary_data <- data_clean2 |>
+  select(feelings_youalone : feelings_youaloneforgiven) |>
+  summarize(across(everything(), list(n = ~n(),
+                                      mean = ~mean(., na.rm = TRUE), 
+                                      sd = ~sd(., na.rm = TRUE))))
+
+# conducting paired samples t-test to assess whether people care about a return apology
+care_test <- t.test(data_clean2$feelings_bothyoufirst, data_clean2$feelings_youalone, 
+                    paired = TRUE)
+
+# extracting t-test results
+care_t = round(care_test$statistic, 3)
+care_df = care_test$parameter
+care_p = care_test$p.value
+care_prob = ifelse(care_p < .001, "<", "=")
+care_p = ifelse(care_p < .001, .001, round(care_p, 3))
+care_ci = round(care_test$conf.int, 2)
+
+# extracting mean and sd
+youalone_mean = round(summary_data$feelings_youalone_mean, 2)
+youalone_sd = round(summary_data$feelings_youalone_sd, 2)
+bothyoufirst_mean = round(summary_data$feelings_bothyoufirst_mean, 2)
+bothyoufirst_sd = round(summary_data$feelings_bothyoufirst_sd, 2)
+```
+
+The subjects cared about getting a return apology after they apologized first. Their average self-reported feeling when they received a return apology after they apologized first was positive, while their reported feeling was negative on average when they did not receive a return apology.
+
+The subjects cared about getting a return apology after they apologized first. The repeated measures t-test demonstrated a statistically significant difference in the subjects' feelings when they apologized first but did not receive an apology in return (M = `r youalone_mean`, SD = `r youalone_sd`) and when they apologized first and received an apology in return (M = `r bothyoufirst_mean`, SD = `r bothyoufirst_sd`); t(`r care_df`) = `r care_t`, p `r care_prob` `r care_p`.
+
+## Does the effect vary as a function of "initiator type"?
+
+```{r data-analyze2, fig.cap = "Effects of initiator type and apology type on subjects' feelings."}
+# converting the cleaned dataset to long format
+data_apology <- data_clean2 |>
+  pivot_longer(cols = "feelings_youalone":"feelings_youaloneforgiven",
+               names_to = "apology_type", 
+               values_to = "response")
+
+# filtering data for 2 X 2 ANOVA 
+filtered_data <- data_apology |>
+  filter(apology_type %in% c("feelings_bothyoufirst", "feelings_youalone"))
+
+# running a 2 x 2 ANOVA to assess whether the effect varies as a function of initiator type
+twoway_anova <- aov_ez(id = "ResponseId", between = "initiator_type", 
+                       within = "apology_type", dv = "response",
+                       es = "pes", data = filtered_data)
+# summary(twoway_anova)
+
+# extracting ANOVA results
+anova_results <- broom::tidy(twoway_anova$anova_table)
+
+# creating a grouped bar chart to illustrate ANOVA findings
+anova_barplot <- ggplot(filtered_data, 
+                        aes(x = apology_type, y = response, 
+                            fill = initiator_type)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Apology Type",
+       y = "Subjects' Feeling", 
+       fill = "Initiator Type") + 
+  scale_x_discrete(labels = c("Only You Apologized", "Both Apologized (You First)")) +
+  scale_fill_manual(values = c("darkgreen", "dodgerblue", "firebrick"), 
+    labels = c("Always", "Conditional", "Never")) +
+  coord_flip()
+
+print(anova_barplot)
+```
+
+A two-way ANOVA was performed to assess the effects of initiator type and apology type on the subjects’ feelings. The results indicated a significant main effect for initiator type, F(2, 42) = 4.22, p = .021, suggesting that subjects’ feelings depended on whether they recognized themselves as always initiators, never initiators, or conditional initiators. Figure \@ref(fig:data-analyze2) presented the difference in subjects’ feeling as a function of initiator type and apology type. 
+
+The results also revealed a significant main effect for apology type, F(1, 42) = 139.12, p < .001. However, the interaction between initiator type and apology type was not significant, F(2, 42) = .65, p = .527, suggesting that the effect of initiator type on the subjects' feelings did not significantly vary across the levels of apology type. 
+
+## Is return apology viewed as a form of forgiveness? 
+
+```{r data-analyze3}
+# conducting paired samples t-test to assess whether people view return apology as a form of forgiveness
+forgive_test <- t.test(data_clean2$feelings_youaloneforgiven, data_clean2$feelings_youalone, 
+                    paired = TRUE)
+
+# extracting t-test results
+forgive_t = round(forgive_test$statistic, 3)
+forgive_df = forgive_test$parameter
+forgive_p = forgive_test$p.value
+forgive_prob = ifelse(forgive_p < .001, "<", "=")
+forgive_p = ifelse(forgive_p < .001, .001, round(forgive_p, 3))
+forgive_ci = round(forgive_test$conf.int, 2)
+
+# extracting mean and sd
+youaloneforgiven_mean = round(summary_data$feelings_youaloneforgiven_mean, 2)
+youaloneforgiven_sd = round(summary_data$feelings_youaloneforgiven_sd, 2)
+```
+
+The subjects viewed the return apology as a form of forgiveness. The participants’ average feeling remained negative after receiving forgiveness in return for their apology, even though the average feeling was more negative when they did not receive any apology or forgiveness in return.
+
+The repeated measures t-test demonstrated a statistically significant difference in the subjects' feelings when they apologized first but did not receive an apology in return (M = `r youalone_mean`, SD = `r youalone_sd`) and when they apologized first but the other person only forgave them in return (M = `r youaloneforgiven_mean`, SD = `r youaloneforgiven_sd`); t(`r forgive_df`) = `r forgive_t`, p `r forgive_prob` `r forgive_p`.
+
+# Task 2
+
+## Average Feeling
+
+```{r bar-graph, fig.cap = "Average feeling score by apology type."}
+# creating data table with average feelings and standard errors for six different scenarios and arranging them in descending order
+apology_se <- data_apology |>
+  group_by(apology_type) |>
+  summarize(
+    mean_feeling = mean(response, na.rm = TRUE),
+    se = sd(response, na.rm = TRUE) / sqrt(n())
+  ) |>
+  arrange(desc(mean_feeling)) |>
+  mutate(order = factor(apology_type, levels = apology_type))
+
+# creating barplot of average feelings for six different scenarios 
+feelings_barplot <- ggplot(apology_se, 
+                           aes(x = order, y = mean_feeling, 
+                               fill = order)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = mean_feeling - se, ymax = mean_feeling + se), 
+                width = 0.2, 
+                position = position_dodge(0.9)) +
+  coord_flip() +
+  scale_x_discrete(labels = c("Both Apologized (They First)", "Both Apologized (You First)",
+                              "Only They Apologized", "You Apologized, They Forgave", 
+                              "Neither Apologized", "Only You Apologized")) +
+  labs(x = "Apology Type", y = "Average Feeling Score") +
+  guides(fill = "none")
+  
+feelings_barplot
+```
+
+Figure \@ref(fig:bar-graph) shows that a return apology has an effect on the participants' feelings. The subjects experienced positive feelings only when they received an apology in return. In the four scenarios in which they did not receive a return apology, they had negative feelings.
+
+## One-way ANOVA
+
+```{r anova}
+# conducting a one-way ANOVA 
+anova_feelings <- aov_ez(id = "ResponseId", 
+                         dv = "response",
+                         within = "apology_type", 
+                         data = data_apology)
+# summary(anova_feelings)
+
+# pairwise t-tests comparing "feelings_youalone" to other five scenarios
+pair_feelings <- emmeans(anova_feelings, 
+                         pairwise ~ apology_type, 
+                         adjust = "bonferroni")
+
+# filtering only those comparisons made with "feelings_youalone"
+feelings_stats <- broom::tidy(pair_feelings$contrasts)
+youalone_results <- feelings_stats |>
+  filter(str_detect(contrast, "feelings_youalone(?!forgiven)"))
+```
+
+The one-way repeated measures ANOVA demonstrated a significant main effect of apology type on the participants' feelings, F(5, 220) = 54.726, p < .001, suggesting that different types of apologies affect subjects' feelings. 
+
+Furthermore, the pairwise t-tests comparing "feelings_youalone" to the other five scenarios revealed that apologizing first and not receiving a return apology elicited significantly more negative feelings in subjects than in other 4 scenarios. However, the difference in feelings from "feelings_youalone" were statistically significant for "feelings_bothyoufirst", "feelings_themalone", and "feelings_boththemfirst." 
+
+## Proportion of subjects choosing different Outcome_binary1 options
+
+```{r outcome-binary, fig.cap = "Proportion of people choosing different scenarios."}
+# calculating the proportions of people choosing different options in outcome_binary1
+proportions <- data_clean2 |>
+  group_by(outcome_binary1) |>
+  summarize(count = n()) |>
+  mutate(outcome_proportion = count/ sum(count))
+
+# creating a bar plot 
+barplot <- ggplot(proportions, 
+                  aes(x = outcome_binary1, y = outcome_proportion, 
+                      fill = outcome_binary1)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(labels = c("Both Apologized (You First)", 
+                              "Neither Apologized")) +
+  labs(x = "Scenarios", y = "Proportion") +
+  guides(fill = "none")
+
+print(barplot)
+
+# performing chi-square test
+outcome_diff_test <- chisq.test(proportions$outcome_proportion)
+
+# print(outcome_diff_test)
+```
+The proportion of people choosing 2 different options for the "outcome_binary1" variable did not significantly differ, χ²(1, 45) = .31, p = .578. 
+
+```{r additional-analyze}
+# conducting paired samples t-test to assess whether people care about the order of receiving apology from others
+apology_order <- t.test(data_clean2$feelings_boththemfirst, data_clean2$feelings_bothyoufirst, 
+                    paired = TRUE)
+order_results <- broom::tidy(apology_order)
+```
